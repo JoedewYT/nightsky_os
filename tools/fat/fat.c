@@ -73,6 +73,18 @@ bool readFat(FILE* disk)
     return readSectors(disk, g_BootSector.ReservedSectors, g_BootSector.SectorsPerFat, g_Fat);
 }
 
+bool readRootDirectory(FILE* disk)
+{
+    uint32_t lba = g_BootSector.ReservedSectors + g_BootSector.SectorsPerFat * g_BootSector.FatCount;
+    uint32_t size = sizeof(DirectoryEntry) * g_BootSector.DirEntryCount;
+    uint32_t sectors = (size / g_BootSector.BytesPerSector);
+    if (size % g_BootSector.BytesPerSector > 0)
+        sectors++;
+    
+    g_RootDirectory = (DirectoryEntry*) malloc(sectors * g_BootSector.BytesPerSector);
+    return readSectors(disk, lba, sectors, g_RootDirectory);
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 3)
@@ -101,6 +113,15 @@ int main(int argc, char** argv)
         return -3;
     }
 
+    if (!readRootDirectory(disk))
+    {
+        fprintf(stderr, "Could not read FAT!\n");
+        free(g_Fat);
+        free(g_RootDirectory);
+        return -4;
+    }
+
     free(g_Fat);
+    free(g_RootDirectory);
     return 0;
 }
