@@ -1,0 +1,11 @@
+mkdir -p build
+nasm src/bootloader/boot.asm -f bin -o build/bootloader.bin
+nasm src/kernel/main.asm -f bin -o build/kernel.bin
+dd if=/dev/zero of=build/main_floppy.img bs=512 count=2880
+mkfs.fat -F 12 -n "NSOS" build/main_floppy.img
+mkfs.fat 4.2 (2021-01-31)
+dd if=build/bootloader.bin of=build/main_floppy.img conv=notrunc
+mcopy -i build/main_floppy.img build/kernel.bin "::kernel.bin"
+mcopy -i build/main_floppy.img test.txt "::test.txt"
+mkdir -p build/tools
+gcc -g -o build/tools/fat tools/fat/fat.c

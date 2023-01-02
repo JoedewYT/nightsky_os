@@ -1,5 +1,8 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
 typedef uint8_t bool;
 #define true 1
@@ -53,6 +56,7 @@ typedef struct
 BootSector g_BootSector;
 uint8_t* g_Fat = NULL;
 DirectoryEntry* g_RootDirectory = NULL;
+uint32_t g_RootDirectoryEnd;
 
 bool readBootSector(FILE* disk)
 {
@@ -81,8 +85,41 @@ bool readRootDirectory(FILE* disk)
     if (size % g_BootSector.BytesPerSector > 0)
         sectors++;
     
+    g_RootDirectoryEnd = lba + sectors; 
     g_RootDirectory = (DirectoryEntry*) malloc(sectors * g_BootSector.BytesPerSector);
     return readSectors(disk, lba, sectors, g_RootDirectory);
+}
+
+DirectoryEntry* findFile(const char* name)
+{
+    for (uint32_t i = 0; i < g_BootSector.DirEntryCount; i++)
+    {
+        if (memcmp(name, g_RootDirectory[i].Name, 11) == 0)
+            return &g_RootDirectory[i];
+    }
+
+    return NULL;
+}
+
+bool readFile(DirectoryEntry* fileEntry, FILE* disk, uint8_t* outputBuffer)
+{
+    bool ok = true;
+    uint16_t currentCluster = fileEntry->FirstClusterLow;
+
+    do {
+        uint32_t lba = g_RootDirectoryEnd + (currentCluster - 2) * g_BootSector.SectorsPerCluster;
+        ok = ok && readSectors(disk, lba, g_BootSector.SectorsPerCluster, outputBuffer);
+        outputBuffer += g_BootSector.SectorsPerCluster * g_BootSector.BytesPerSector;
+
+        uint32_t fatIndex = currentCluster * 3 / 2;
+        if (currentCluster % 2 ==0)
+            currentCluster = (*(uint16_t*)(g_Fat + fatIndex)) & 0x0FFF;
+        else
+            currentCluster = (*(uint16_t*)(g_Fat + fatIndex)) >> 4;
+
+    } while (ok && currentCluster < 0x0FF8);
+
+    return ok;
 }
 
 int main(int argc, char** argv)
@@ -120,6 +157,30 @@ int main(int argc, char** argv)
         free(g_RootDirectory);
         return -4;
     }
+
+    DirectoryEntry* fileEntry = findFile(argv[2]);
+    if (!fileEntry) {
+        fprintf(stderr, "Could not find file %s!\n", argv[2]);
+        free(g_Fat);
+        free(g_RootDirectory);
+        return -5;
+    }
+
+    uint8_t* buffer = (uint8_t*) malloc(fileEntry->Size + g_BootSector.BytesPerSector);
+    if (!readFile(fileEntry, disk, buffer)) {
+        fprintf(stderr, "Could not read file %s!\n", argv[2]);
+        free(g_Fat);
+        free(g_RootDirectory);
+        free(buffer);
+        return -5;
+    }
+
+    for (size_t i = 0; i < fileEntry->Size; i++)
+    {
+        if (isprint(buffer[i])) fputc(buffer[i], stdout);
+        else printf("<%02x>", buffer[i]);
+    }
+    printf("\n");
 
     free(g_Fat);
     free(g_RootDirectory);
